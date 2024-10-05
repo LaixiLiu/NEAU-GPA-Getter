@@ -19,6 +19,16 @@ struct Record {
     gpa: Option<f64>,
 }
 
+#[derive(Debug)]
+struct Table {
+    // 专业名称
+    major: String,
+    // 班级名称
+    class: String,
+    // 对应的表格记录
+    data: Vec<Record>,
+}
+
 /// 用于描述一个学院及其下的所有表格的信息
 #[derive(Debug)]
 pub struct College {
@@ -27,11 +37,11 @@ pub struct College {
     // 学院名称
     name: String,
     // 该学院下所有表格的名称
-    data: Vec<Record>,
+    data: Vec<Table>,
 }
 
 impl College {
-    fn new(id: u8, name: String, data: Vec<Record>) -> Self {
+    fn new(id: u8, name: String, data: Vec<Table>) -> Self {
         College { id, name, data }
     }
 }
@@ -85,6 +95,9 @@ fn parse_csv(file_path: &path::PathBuf) -> Result<Vec<Record>, Box<dyn Error>> {
 fn parse_data(dir_path: &path::PathBuf) -> Result<Vec<College>, Box<dyn Error>> {
     let mut result = vec![];
     let dirs = fs::read_dir(dir_path).expect("读取目录失败");
+
+    let re = Regex::new(r"^[a-z]\d{2}([^\d]*)(\d{4})hz.csv$").unwrap();
+
     // 按学院遍历某一学期的智育学分绩目录
     for entry in dirs {
         match entry {
@@ -109,7 +122,25 @@ fn parse_data(dir_path: &path::PathBuf) -> Result<Vec<College>, Box<dyn Error>> 
                                 let result = parse_csv(&table.path());
                                 match result {
                                     Ok(records) => {
-                                        data.extend(records);
+                                        // 解析专业，班级信息
+                                        let table_name = table.file_name();
+                                        let table_name =
+                                            table_name.to_str().expect("文件名不是有效的字符串");
+
+                                        let captures = re
+                                            .captures(table_name)
+                                            .expect("文件名不符合正则表达式");
+                                        let major_name =
+                                            captures.get(1).map_or("", |m| m.as_str()).to_string();
+                                        let class_name =
+                                            captures.get(2).map_or("", |m| m.as_str()).to_string();
+
+                                        let table = Table {
+                                            major: major_name,
+                                            class: class_name,
+                                            data: records,
+                                        };
+                                        data.push(table);
                                     }
                                     Err(e) => {
                                         panic!("解析表格失败: {}", e);
@@ -166,10 +197,11 @@ fn judge_data_path(dir_path: &str) -> Result<Vec<path::PathBuf>, Box<dyn Error>>
     }
 
     if data_path.len() < 1 {
-        return Err(format!(
+        return Err(
             "请确保选择的路径下存在名称为如下格式的目录: 20xx-20xx-x学期智育学分绩"
-        )
-        .into());
+                .to_string()
+                .into(),
+        );
     }
 
     let re = Regex::new(r"^\d{2}.*$").unwrap();
@@ -236,6 +268,15 @@ mod tests {
         let result = parse_data(&file_path).unwrap();
         for college in &result {
             println!("{:?}", college.name);
+            for table in &college.data {
+                println!("{:?}", table.major);
+                println!("{:?}", table.class);
+                // for record in &table.data {
+                //     println!("{:?}", record.sid);
+                //     println!("{:?}", record.name);
+                //     println!("{:?}", record.gpa);
+                // }
+            }
         }
         assert_eq!(result.len(), 16);
     }
