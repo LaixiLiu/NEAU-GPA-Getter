@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use sqlx::SqlitePool;
+use sqlx::{Pool, Sqlite, SqlitePool};
 use tauri::App;
 
 use super::{student, AppState};
@@ -34,44 +34,42 @@ pub async fn init_db(path: &mut PathBuf) -> Result<SqlitePool, Box<dyn Error>> {
     Ok(pool)
 }
 
-pub async fn add_or_update_student(
-    state: tauri::State<'_, AppState>,
+pub async fn insert_or_update_student(
+    db: &Pool<Sqlite>,
     student: &student::Student,
 ) -> Result<(), Box<dyn Error>> {
-    let db = &state.db;
-
-    let result = sqlx::query(
+    sqlx::query(
         r#"
-        INSERT INTO student (id, name, college, major)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT(id) DO UPDATE SET college = $3, major = $4
+        INSERT INTO students (id, name)
+        VALUES ($1, $2)
+        ON CONFLICT(id) DO UPDATE SET name = $2
         "#,
     )
     .bind(&student.id)
     .bind(&student.name)
-    .bind(&student.college)
-    .bind(&student.major)
     .execute(db)
     .await?;
 
     Ok(())
 }
 
-pub async fn add_record(
-    state: tauri::State<'_, AppState>,
-    record: &student::Record,
+pub async fn insert_academic_record(
+    db: &Pool<Sqlite>,
+    sid: &str,
+    record: &student::AcademicRecord,
 ) -> Result<(), Box<dyn Error>> {
-    let db = &state.db;
-
-    let result = sqlx::query(
+    sqlx::query(
         r#"
-        INSERT INTO records (term, gpa, sid)
-        VALUES ($1, $2, $3)
+        INSERT INTO records (term, student_id, term, college, class, major, gpa)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(&record.term)
+    .bind(&sid)
+    .bind(&record.college)
+    .bind(&record.class)
+    .bind(&record.major)
     .bind(&record.gpa)
-    .bind(&record.sid)
     .execute(db)
     .await?;
 
@@ -85,48 +83,21 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_init_db() {
+    async fn test_database_initialization() {
         let mut work_dir = std::env::current_dir().unwrap();
 
         init_db(&mut work_dir).await.unwrap();
     }
 
-    async fn add_student(db: &SqlitePool, student: &student::Student) {
-        sqlx::query(
-            r#"
-        INSERT INTO students (id, name, college, major)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT(id) DO UPDATE SET college = $3, major = $4
-        "#,
-        )
-        .bind(&student.id)
-        .bind(&student.name)
-        .bind(&student.college)
-        .bind(&student.major)
-        .execute(db)
-        .await
-        .unwrap();
-    }
-
     #[tokio::test]
-    async fn test_add_student() {
+    async fn test_student_insertion() {
         let mut work_dir = std::env::current_dir().unwrap();
         let pool = init_db(&mut work_dir).await.unwrap();
 
-        let s1 = student::Student {
-            id: "123456".to_string(),
-            name: "张三".to_string(),
-            college: "计算机学院".to_string(),
-            major: "软件工程".to_string(),
-        };
-        let s2 = student::Student {
-            id: "123456".to_string(),
-            name: "李四".to_string(),
-            college: "水利学院".to_string(),
-            major: "土木工程".to_string(),
-        };
+        let s1 = student::Student::new("A19220121".to_string(), "张三".to_string());
+        let s2 = student::Student::new("A19220122".to_string(), "李四".to_string());
 
-        add_student(&pool, &s1).await;
-        add_student(&pool, &s2).await;
+        insert_or_update_student(&pool, &s1).await.unwrap();
+        insert_or_update_student(&pool, &s2).await.unwrap();
     }
 }
