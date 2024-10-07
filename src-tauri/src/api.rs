@@ -1,8 +1,9 @@
-use std::error::Error;
+use std::{error::Error, path};
 
 use db::init_db;
 use sqlx::{Pool, Sqlite};
-use tauri::App;
+use student::ParsedStudentData;
+use tauri::{App, Manager};
 
 mod csv_processor;
 mod db;
@@ -15,8 +16,8 @@ pub struct AppState {
 pub async fn setup_db(app: &App) -> Pool<Sqlite> {
     // init db
     let mut path = app
-        .path_resolver()
-        .app_data_dir()
+        .path()
+        .data_dir()
         .expect("Failed to get the data directory");
     init_db(&mut path).await.unwrap()
 }
@@ -29,6 +30,13 @@ pub async fn init_searcher(
     // parse csv
     let data = csv_processor::extract_data_from_files(path)?;
     // set db
+    // TODO: use multiple threads to insert data
+    for (sid, ParsedStudentData { student, records }) in data {
+        db::insert_or_update_student(db, &student).await?;
+        for record in records {
+            db::insert_academic_record(db, &sid, &record).await?;
+        }
+    }
 
     Ok(())
 }

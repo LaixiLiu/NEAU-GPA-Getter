@@ -2,17 +2,21 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
+use tokio::runtime;
 
 mod api;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::default().build())
         .build(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap();
 
-    let db = api::setup_db(&app).await;
+    let db = runtime::Runtime::new()
+        .unwrap()
+        .block_on(api::setup_db(&app));
+
     app.manage(api::AppState { db });
+
     app.run(|_, _| {});
 }

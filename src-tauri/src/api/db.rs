@@ -1,12 +1,8 @@
-use std::{
-    error::Error,
-    path::{Path, PathBuf},
-};
+use std::{error::Error, path::PathBuf};
 
 use sqlx::{Pool, Sqlite, SqlitePool};
-use tauri::App;
 
-use super::{student, AppState};
+use super::student;
 
 pub async fn init_db(path: &mut PathBuf) -> Result<SqlitePool, Box<dyn Error>> {
     // create the data directory if it doesn't exist
@@ -14,6 +10,11 @@ pub async fn init_db(path: &mut PathBuf) -> Result<SqlitePool, Box<dyn Error>> {
         .map_err(|e| format!("Failed to create data directory: {}", e))?;
 
     // append the database file name to the path
+    path.push("com.neau.gpa.getter");
+    if !path.exists() {
+        std::fs::create_dir_all(&path)
+            .map_err(|e| format!("Failed to create data directory: {}", e))?;
+    }
     path.push("data.db");
 
     // test if the database file exists
@@ -78,8 +79,6 @@ pub async fn insert_academic_record(
 
 #[cfg(test)]
 mod tests {
-    use tauri::{generate_context, Manager, State};
-
     use super::*;
 
     #[tokio::test]
