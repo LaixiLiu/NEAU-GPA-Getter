@@ -60,12 +60,12 @@ pub async fn insert_academic_record(
 ) -> Result<(), Box<dyn Error>> {
     sqlx::query(
         r#"
-        INSERT INTO records (term, student_id, term, college, class, major, gpa)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO records (student_id, term, college, class, major, gpa)
+        VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
-    .bind(&record.term)
     .bind(&sid)
+    .bind(&record.term)
     .bind(&record.college)
     .bind(&record.class)
     .bind(&record.major)
@@ -99,5 +99,35 @@ mod tests {
 
         insert_or_update_student(&pool, &s1).await.unwrap();
         insert_or_update_student(&pool, &s2).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_academic_record_insertion() {
+        let mut work_dir = std::env::current_dir().unwrap();
+        let pool = init_db(&mut work_dir).await.unwrap();
+
+        let s1 = student::Student::new("A19220121".to_string(), "张三".to_string());
+        let s2 = student::Student::new("A19220122".to_string(), "李四".to_string());
+
+        insert_or_update_student(&pool, &s1).await.unwrap();
+        insert_or_update_student(&pool, &s2).await.unwrap();
+
+        let r1 = student::AcademicRecord::new(
+            "2020-2021-1".to_string(),
+            Some(3.5),
+            "计算机学院".to_string(),
+            "计科1901".to_string(),
+            "计算机科学与技术".to_string(),
+        );
+        let r2 = student::AcademicRecord::new(
+            "2020-2021-1".to_string(),
+            Some(3.6),
+            "计算机学院".to_string(),
+            "计科1902".to_string(),
+            "计算机科学与技术".to_string(),
+        );
+
+        insert_academic_record(&pool, &s1.id, &r1).await.unwrap();
+        insert_academic_record(&pool, &s2.id, &r2).await.unwrap();
     }
 }
