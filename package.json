@@ -1,16 +1,20 @@
 {
-  "name": "neau-gpa-getter",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^3.1.1",
-    "svelte": "^4.2.18",
-    "vite": "^5.4.1"
-  }
+	"name": "neau-gpa-getter",
+	"version": "0.0.1",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview"
+	},
+	"devDependencies": {
+		"@fontsource/fira-mono": "^5.0.0",
+		"@neoconfetti/svelte": "^2.0.0",
+		"@sveltejs/adapter-auto": "^3.0.0",
+		"@sveltejs/adapter-static": "^3.0.5",
+		"@sveltejs/kit": "^2.0.0",
+		"@sveltejs/vite-plugin-svelte": "^3.0.0",
+		"svelte": "^4.2.7",
+		"vite": "^5.0.3"
+	},
+	"type": "module"
 }
