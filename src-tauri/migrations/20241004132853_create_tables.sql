@@ -13,6 +13,6 @@ CREATE TABLE
         college TEXT NOT NULL,
         class TEXT NOT NULL,
         major TEXT NOT NULL,
-        gpa REAL NOT NULL,
+        gpa REAL,
         FOREIGN KEY (student_id) REFERENCES students (id)
     );
