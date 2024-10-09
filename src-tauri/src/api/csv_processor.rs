@@ -26,20 +26,10 @@ pub struct StudentRecord {
     pub gpa: Option<f64>,
 }
 
-#[derive(Debug)]
-pub struct GradeTable {
-    // 专业名称
-    pub major: String,
-    // 班级
-    pub class: String,
-    // 对应的表格记录
-    pub data: Vec<StudentRecord>,
-}
-
 // TODO: 添加多线程解析数据的功能
 /// 单线程获取指定路径下的所有csv文件数据
 pub fn extract_data_from_files(
-    path: &str,
+    path: &PathBuf,
 ) -> Result<HashMap<String, student::ParsedStudentData>, Box<dyn Error>> {
     let mut result = HashMap::new();
     let data_path = get_valid_data_paths(path)?;
@@ -49,7 +39,7 @@ pub fn extract_data_from_files(
     Ok(result)
 }
 
-pub fn parse_term_data(
+fn parse_term_data(
     path: &PathBuf,
     data: &mut HashMap<String, student::ParsedStudentData>,
 ) -> Result<(), Box<dyn Error>> {
@@ -154,17 +144,16 @@ fn extract_csv_data(file_path: &path::PathBuf) -> Result<Vec<StudentRecord>, Box
 }
 
 /// 测试数据路径是否符合格式要求
-fn get_valid_data_paths(dir_path: &str) -> Result<Vec<path::PathBuf>, Box<dyn Error>> {
-    let path = path::Path::new(dir_path);
+fn get_valid_data_paths(path: &PathBuf) -> Result<Vec<path::PathBuf>, Box<dyn Error>> {
     if !path.is_dir() {
-        return Err(format!("请提供合法的文件所在目录路径: {}", dir_path).into());
+        return Err(format!("请提供合法的文件所在目录路径: {}", path.display()).into());
     }
 
     let mut data_path = vec![];
 
     // 获取dir_path下的所有目录
     // 保存符合格式要求的目录
-    let dirs = fs::read_dir(dir_path)?;
+    let dirs = fs::read_dir(path)?;
     for entry in dirs {
         match entry {
             Ok(dir) if dir.path().is_dir() => {
@@ -260,28 +249,28 @@ mod tests {
 
     #[test]
     fn test_handles_invalid_data_path() {
-        let dir_path = "D:\\path\\to\\dir";
-        match get_valid_data_paths(dir_path) {
+        let dir_path = PathBuf::from("D:\\path\\to\\dir");
+        match get_valid_data_paths(&dir_path) {
             Ok(_) => panic!("非法文件路径但未检测出"),
             Err(e) => assert_eq!(
                 e.to_string(),
                 "请提供合法的文件所在目录路径: D:\\path\\to\\dir"
             ),
         }
-        let dir_path = r"D:\project\web\neau-gpa-getter\src-tauri\test";
-        match get_valid_data_paths(dir_path) {
+        let dir_path = PathBuf::from(r"D:\project\web\neau-gpa-getter\src-tauri\test");
+        match get_valid_data_paths(&dir_path) {
             Ok(_) => panic!("非法文件路径但未检测出"),
             Err(e) => assert_eq!(
                 e.to_string(),
                 "请确保选择的路径下存在名称为如下格式的目录: 20xx-20xx-x学期智育学分绩"
             ),
         }
-        let dir_path = r"D:\project\web\neau-gpa-getter\src-tauri\test\data\extra";
-        match get_valid_data_paths(dir_path) {
+        let dir_path = PathBuf::from(r"D:\project\web\neau-gpa-getter\src-tauri\test\data\extra");
+        match get_valid_data_paths(&dir_path) {
             Ok(_) => panic!("非法文件路径但未检测出"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                format!( "{}\\2030-2031-1学期智育学分绩\\test 目录名称不符合如下格式: 19电信\n请检查是否选择了正确的目录或者是否对目录下的文件进行了修改", dir_path )
+                format!( "{}\\2030-2031-1学期智育学分绩\\test 目录名称不符合如下格式: 19电信\n请检查是否选择了正确的目录或者是否对目录下的文件进行了修改", dir_path.display() )
             ),
         }
     }
@@ -311,7 +300,7 @@ mod tests {
             }
         }
         assert_eq!(data_path.len(), 4);
-        let result = get_valid_data_paths(dir_path);
+        let result = get_valid_data_paths(&PathBuf::from(dir_path));
         assert!(result.is_ok());
         let result_path = result.unwrap();
         assert_eq!(result_path.len(), 4);
