@@ -107,6 +107,7 @@ fn parse_term_data(
     Ok(())
 }
 
+/// 校验文件名称
 fn verify_file_name(file_path: &path::PathBuf, re_str: &str) -> Result<(), Box<dyn Error>> {
     let re = Regex::new(re_str).unwrap();
 
@@ -116,6 +117,18 @@ fn verify_file_name(file_path: &path::PathBuf, re_str: &str) -> Result<(), Box<d
     }
 
     Ok(())
+}
+
+/// 判断csv是否有绩点列
+fn check_gpa_column(record: &csv::StringRecord) -> bool {
+    let column_three = record.iter().skip(2).take(1).next();
+    match column_three {
+        Some(name) => {
+            let re = Regex::new(r"^\d{5}\|\d\.\d\|\d{4}-\d{4}-\d智育学分绩\|\|$").unwrap();
+            re.is_match(name)
+        }
+        None => false,
+    }
 }
 
 /// 解析指定路径下的csv文件
@@ -133,13 +146,48 @@ fn extract_csv_data(file_path: &path::PathBuf) -> Result<Vec<StudentRecord>, Box
     let file = std::fs::File::open(file_path)?;
     let mut result = vec![];
     let mut rdr = csv::Reader::from_reader(file);
-    let mut record_iter = rdr.deserialize();
-    // skip the first record
-    record_iter.next();
-    for rd in record_iter {
-        let record: StudentRecord = rd?;
-        result.push(record);
+
+    // special judge for the first line
+    let header_record = rdr.records().next();
+    let has_valid_gpa = {
+        match header_record {
+            Some(record) => check_gpa_column(&record?),
+            None => {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Empty file",
+                )))
+            }
+        }
+    };
+
+    match has_valid_gpa {
+        true => {
+            let record_iter = rdr.deserialize();
+
+            for rd in record_iter {
+                let record: StudentRecord = rd?;
+                result.push(record);
+            }
+        }
+        false => {
+            let record_iter = rdr.records();
+
+            for record in record_iter {
+                let record = record?;
+                let sid = record.get(0).unwrap();
+                let name = record.get(1).unwrap();
+                let gpa = None;
+                let student = StudentRecord {
+                    sid: sid.to_string(),
+                    name: name.to_string(),
+                    gpa,
+                };
+                result.push(student);
+            }
+        }
     }
+
     Ok(result)
 }
 
