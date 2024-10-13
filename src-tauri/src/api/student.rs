@@ -1,38 +1,39 @@
-use csv;
-use regex::Regex;
-use serde::Deserialize;
-use std::{error::Error, path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
-struct Student {
+use super::csv_processor;
+
+pub struct Student {
     // 学号
     pub id: String,
     // 姓名
     pub name: String,
 }
 
+#[derive(Clone)]
 pub struct AcademicInfo {
     // 学期
     pub term: Arc<String>,
     // 学院
     pub college: Arc<String>,
     // 班级
-    pub class: String,
+    pub class: Arc<String>,
     // 专业
-    pub major: String,
+    pub major: Arc<String>,
 }
 
-struct AcademicRecord {
-    pub gpa: Option<f64>,
-    pub info: AcademicInfo,
-}
-
-pub struct ParsedRecord {
-    student: Student,
-    records: Vec<AcademicRecord>,
+impl Student {
+    pub fn new(id: String, name: String) -> Self {
+        Self { id, name }
+    }
 }
 
 impl AcademicInfo {
-    pub fn new(term: Arc<String>, college: Arc<String>, class: String, major: String) -> Self {
+    pub fn new(
+        term: Arc<String>,
+        college: Arc<String>,
+        class: Arc<String>,
+        major: Arc<String>,
+    ) -> Self {
         Self {
             term,
             college,

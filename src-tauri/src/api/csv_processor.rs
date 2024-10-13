@@ -7,8 +7,8 @@ use serde::Deserialize;
 use super::student;
 
 // 行记录
-#[derive(Debug, Deserialize)]
-struct RowRecord {
+#[derive(Deserialize)]
+pub struct RowRecord {
     // 学号
     #[serde(rename = "xh")]
     pub sid: String,
@@ -25,8 +25,8 @@ type CsvRecords = Vec<RowRecord>;
 
 // csv表
 pub struct CsvTable {
-    records: CsvRecords,
-    info: student::AcademicInfo,
+    pub records: CsvRecords,
+    pub info: student::AcademicInfo,
 }
 
 // csv表构建器
@@ -48,8 +48,12 @@ impl<'builder> CsvTableBuilder<'builder> {
     pub fn build(&self) -> Result<CsvTable, Box<dyn Error>> {
         let (major, class) = self.extract_major_and_class_info()?;
         let records = self.build_csv_records()?;
-        let info =
-            student::AcademicInfo::new(self.term.clone(), self.college.clone(), major, class);
+        let info = student::AcademicInfo::new(
+            self.term.clone(),
+            self.college.clone(),
+            Arc::new(major),
+            Arc::new(class),
+        );
 
         Ok(CsvTable {
             records: records,
@@ -134,4 +138,98 @@ fn check_gpa_column(record: &csv::StringRecord) -> bool {
 }
 
 #[cfg(test)]
-mod tests {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs::File, io::Write};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_extract_major_and_class_info_valid() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("a22major2022hz.csv");
+        File::create(&file_path).unwrap();
+
+        let builder = CsvTableBuilder::new(
+            Arc::new("2022".to_string()),
+            Arc::new("Engineering".to_string()),
+            &file_path,
+        );
+
+        let (major, class) = builder.extract_major_and_class_info().unwrap();
+        assert_eq!(major, "major");
+        assert_eq!(class, "2022");
+    }
+
+    #[test]
+    fn test_extract_major_and_class_info_invalid() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("invalid_filename.csv");
+        File::create(&file_path).unwrap();
+
+        let builder = CsvTableBuilder::new(
+            Arc::new("2022".to_string()),
+            Arc::new("Engineering".to_string()),
+            &file_path,
+        );
+
+        let result = builder.extract_major_and_class_info();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_csv_records_with_gpa() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test_with_gpa.csv");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "xh,xm,k101").unwrap();
+        writeln!(file, ",,00231|0.0|2022-2023-1智育学分绩||").unwrap();
+        writeln!(file, "12345,John Doe,3.5").unwrap();
+
+        let builder = CsvTableBuilder::new(
+            Arc::new("2022".to_string()),
+            Arc::new("Engineering".to_string()),
+            &file_path,
+        );
+
+        let records = builder.build_csv_records().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].sid, "12345");
+        assert_eq!(records[0].name, "John Doe");
+        assert_eq!(records[0].gpa, Some(3.5));
+    }
+
+    #[test]
+    fn test_build_csv_records_without_gpa() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test_without_gpa.csv");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "xh,xm,k101").unwrap();
+        writeln!(file, ",,00231|0.0|2022-2023-1智育学分绩||").unwrap();
+        writeln!(file, "12345,John Doe,").unwrap();
+
+        let builder = CsvTableBuilder::new(
+            Arc::new("2022".to_string()),
+            Arc::new("Engineering".to_string()),
+            &file_path,
+        );
+
+        let records = builder.build_csv_records().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].sid, "12345");
+        assert_eq!(records[0].name, "John Doe");
+        assert_eq!(records[0].gpa, None);
+    }
+
+    #[test]
+    fn test_check_gpa_column_valid() {
+        let record = csv::StringRecord::from(vec!["xh", "xm", "00101|3.5|2022-2023-1智育学分绩||"]);
+        assert!(check_gpa_column(&record));
+    }
+
+    #[test]
+    fn test_check_gpa_column_invalid() {
+        let record = csv::StringRecord::from(vec!["xh", "xm", "invalid_column"]);
+        assert!(!check_gpa_column(&record));
+    }
+}
