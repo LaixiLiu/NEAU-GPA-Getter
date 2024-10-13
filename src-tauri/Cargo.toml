@@ -22,6 +22,7 @@ tauri = { version = "2", features = [] }
 regex = "1.9.6"
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
 tokio = { version = "1.30", features = ["full"] }
+tempfile = "3"
 dotenv = "0.15.0"
 futures = "0.3"
 tauri-plugin-dialog = "2"
