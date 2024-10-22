@@ -1,33 +1,25 @@
 use std::{
-    path::{self, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use db::init_db;
-use sqlx::{Pool, Sqlite};
-use student::ParsedStudentData;
+use db::AppState;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 mod csv_processor;
+mod data_parser;
 mod db;
 mod student;
 
-pub struct AppState {
-    pub db: Pool<Sqlite>,
-}
-
 pub async fn setup_db(app: &AppHandle) {
-    // init db
-    let mut path = app
-        .path()
-        .data_dir()
-        .expect("Failed to get the data directory");
-    let db = init_db(&mut path).await.expect("Failed to init db");
-    app.manage(AppState { db });
+    let db = db::AppState::build(app)
+        .await
+        .expect("Failed to build the database");
+    app.manage(db);
 }
 
-async fn pick_folder_dialog(app: tauri::AppHandle) -> Option<path::PathBuf> {
+async fn pick_folder_dialog(app: AppHandle) -> Option<PathBuf> {
     let directory_path = Arc::new(Mutex::new(None));
 
     // clone the directory_path which will be used in closure
@@ -59,29 +51,48 @@ async fn pick_folder_dialog(app: tauri::AppHandle) -> Option<path::PathBuf> {
 
 #[tauri::command]
 pub async fn initialize_searcher(
-    state: tauri::State<'_, AppState>,
-    app: tauri::AppHandle,
+    db: tauri::State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<(), String> {
-    let db = &state.db;
-
     let path: PathBuf = match pick_folder_dialog(app).await {
         Some(val) => val,
         None => return Ok(()),
     };
+
+    // 计时
+    let start = std::time::Instant::now();
+
     // parse csv
-    let data = csv_processor::extract_data_from_files(&path).map_err(|err| err.to_string())?;
+    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    let producer = data_parser::DataProducer::new(tx);
+    let mut consumer = data_parser::DataConsumer::new(rx);
+
+    // todo: handle the error
+    let producer_task = tokio::spawn(async move {
+        producer.produce(path).await.unwrap();
+    });
+    let consumer_task = tokio::spawn(async move { consumer.consume().await.unwrap() });
+
+    let (producer_result, consumer_result) = tokio::join!(producer_task, consumer_task);
+
+    // 结束计时
+    let elapsed = start.elapsed();
+    println!("Time elapsed for parsing csv files: {:?}", elapsed);
+
+    // handle the error
+    if let Err(e) = producer_result {
+        return Err(format!("Failed to produce data: {:?}", e));
+    }
+    let data = match consumer_result {
+        Ok(t) => t,
+        Err(e) => return Err(format!("Failed to consume data: {:?}", e)),
+    };
+
     // set db
     // TODO: use multiple threads to insert data
-    for (sid, ParsedStudentData { student, records }) in data {
-        db::insert_or_update_student(db, &student)
-            .await
-            .map_err(|err| err.to_string())?;
-        for record in records {
-            db::insert_academic_record(db, &sid, &record)
-                .await
-                .map_err(|err| err.to_string())?;
-        }
-    }
+    db.set(data)
+        .await
+        .map_err(|e| format!("Failed to set data: {:?}", e))?;
 
     Ok(())
 }
