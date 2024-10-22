@@ -21,7 +21,7 @@ pub struct RowRecord {
     pub gpa: Option<f64>,
 }
 
-type CsvRecords = Vec<RowRecord>;
+pub type CsvRecords = Vec<RowRecord>;
 
 // csv表
 pub struct CsvTable {
@@ -55,10 +55,7 @@ impl<'builder> CsvTableBuilder<'builder> {
             Arc::new(class),
         );
 
-        Ok(CsvTable {
-            records: records,
-            info,
-        })
+        Ok(CsvTable { records, info })
     }
 
     fn build_csv_records(&self) -> Result<CsvRecords, Box<dyn Error>> {
@@ -110,7 +107,7 @@ impl<'builder> CsvTableBuilder<'builder> {
     }
 
     fn extract_major_and_class_info(&self) -> Result<(String, String), Box<dyn Error>> {
-        let re = Regex::new(r"^[a-z]\d{2}([^\d]*)(\d{4})hz.csv$").unwrap();
+        let re = Regex::new(r"^[a-z]\d{2}((\D*)\d{4})hz.csv$").unwrap();
         if re.is_match(self.csv_path.file_name().unwrap().to_str().unwrap()) {
             let captures = re
                 .captures(self.csv_path.file_name().unwrap().to_str().unwrap())
