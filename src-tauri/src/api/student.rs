@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use super::csv_processor;
-
 pub struct Student {
     // 学号
     pub id: String,
@@ -19,6 +17,13 @@ pub struct AcademicInfo {
     pub class: Arc<String>,
     // 专业
     pub major: Arc<String>,
+}
+
+pub struct AcademicRecordId {
+    pub term_id: i32,
+    pub college_id: i32,
+    pub major_id: i32,
+    pub class_id: i32,
 }
 
 impl Student {
