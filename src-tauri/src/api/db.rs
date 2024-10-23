@@ -56,25 +56,36 @@ impl AppState {
 
         // calculate the number of tasks
         let data_cnt = data.len();
-        let task_cnt = data_cnt / 400;
+        let task_cnt = {
+            if data_cnt % 400 == 0 {
+                data_cnt / 400
+            } else {
+                data_cnt / 400 + 1
+            }
+        };
 
         // create the tasks
         for i in 1..=task_cnt {
             // calculate the start and end index
             let start = (i - 1) * 400;
             let end = if i < task_cnt { i * 400 } else { data_cnt };
+            println!("start: {}, end: {}", start, end);
             // clone the data and the database
             let data_clone = Arc::clone(&data);
-            let db_state = self.clone();
+            let db = self.db.clone();
             // create the task
             let task = tokio::spawn(async move {
                 let data_slice = &data_clone[start..end];
                 for csv_table in data_slice {
-                    let mut tx = db_state.db.begin().await?;
+                    let mut tx_1 = db.begin().await.unwrap();
                     let CsvTable { records, info } = csv_table;
-                    let academic_info_id = insert_academic_info(&mut tx, &info).await?;
-                    insert_csv_row_record(&mut tx, records, academic_info_id).await?;
-                    tx.commit().await?;
+                    let academic_info_id = insert_academic_info(&mut tx_1, &info).await.unwrap();
+                    tx_1.commit().await.unwrap();
+                    let mut tx_2 = db.begin().await.unwrap();
+                    insert_csv_row_record(&mut tx_2, records, academic_info_id)
+                        .await
+                        .unwrap();
+                    tx_2.commit().await.unwrap();
                 }
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             });
@@ -131,16 +142,22 @@ async fn insert_csv_row_record<'db_connect>(
     academic_info_id: AcademicInfoId,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     for record in records {
-        sqlx::query(r"  INSERT OR IGNORE INTO students (student_number, name) VALUES (?1, ?2);")
-            .bind(record.sid.as_str())
-            .bind(record.name.as_str())
-            .execute(&mut **tx)
-            .await?;
+        // insert the student info
+        insert_or_ignore(
+            tx,
+            r"INSERT OR IGNORE INTO students (student_number, name) VALUES (?1, ?2);",
+            vec![record.sid.as_str(), record.name.as_str()],
+        )
+        .await
+        .unwrap();
+        // get the student info
         let student: Student =
             sqlx::query_as(r"SELECT * FROM students WHERE student_number == (?1)")
                 .bind(record.sid.as_str())
                 .fetch_one(&mut **tx)
-                .await?;
+                .await
+                .unwrap();
+        // insert the academic record
         sqlx::query(
             r"INSERT INTO academic_records 
                 ( gpa, term_id, class_id, college_id, major_id, student_id )
@@ -153,7 +170,8 @@ async fn insert_csv_row_record<'db_connect>(
         .bind(academic_info_id.major_id)
         .bind(student.student_id)
         .execute(&mut **tx)
-        .await?;
+        .await
+        .unwrap();
     }
 
     Ok(())
@@ -165,24 +183,41 @@ async fn insert_academic_info<'db_connect>(
     tx: &mut sqlx::Transaction<'db_connect, Sqlite>,
     record: &AcademicInfo,
 ) -> Result<AcademicInfoId, Box<dyn Error + Send + Sync>> {
-    // create the query statement
-    sqlx::query(r"  INSERT OR IGNORE INTO classes (class_name) VALUES (?1)")
-        .bind(record.class.as_str())
-        .execute(&mut **tx)
-        .await?;
-    sqlx::query(r"  INSERT OR IGNORE INTO majors (major_name) VALUES (?1);")
-        .bind(record.major.as_str())
-        .execute(&mut **tx)
-        .await?;
-    sqlx::query(r"  INSERT OR IGNORE INTO colleges (college_name) VALUES (?1);")
-        .bind(record.college.as_str())
-        .execute(&mut **tx)
-        .await?;
-    sqlx::query(r"  INSERT OR IGNORE INTO terms (term_name) VALUES (?1);")
-        .bind(record.term.as_str())
-        .execute(&mut **tx)
-        .await?;
+    // insert the academic info into the database
+    // insert class
+    insert_or_ignore(
+        tx,
+        r"INSERT OR IGNORE INTO classes (class_name) VALUES (?1)",
+        vec![record.class.as_str()],
+    )
+    .await
+    .unwrap();
+    // insert major
+    insert_or_ignore(
+        tx,
+        r"INSERT OR IGNORE INTO majors (major_name) VALUES (?1);",
+        vec![record.major.as_str()],
+    )
+    .await
+    .unwrap();
+    // insert college
+    insert_or_ignore(
+        tx,
+        r"INSERT OR IGNORE INTO colleges (college_name) VALUES (?1);",
+        vec![record.college.as_str()],
+    )
+    .await
+    .unwrap();
+    // insert term
+    insert_or_ignore(
+        tx,
+        r"INSERT OR IGNORE INTO terms (term_name) VALUES (?1);",
+        vec![record.term.as_str()],
+    )
+    .await
+    .unwrap();
 
+    // get the academic info id
     let academic_info_id = sqlx::query_as(
         r"SELECT
                     t.term_id,
@@ -201,9 +236,39 @@ async fn insert_academic_info<'db_connect>(
     .bind(record.term.as_str())
     .fetch_one(&mut **tx)
     .await
-    .unwrap();
+    .unwrap(); // todo: handle the error
 
     Ok(academic_info_id)
+}
+
+async fn insert_or_ignore<'db_connection>(
+    tx: &mut sqlx::Transaction<'db_connection, Sqlite>,
+    sql_statement: &str,
+    values: Vec<&str>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut retries = 10; // todo: move to the configuration
+
+    // loop until the operation is successful
+    loop {
+        // create the sql statement
+        let mut sql = sqlx::query(sql_statement);
+        for value in &values {
+            sql = sql.bind(value);
+        }
+
+        let result = sql.execute(&mut **tx).await;
+        match result {
+            Ok(_) => return Ok(()),
+            Err(e) if e.to_string().contains("database is locked") => {
+                retries -= 1;
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // todo: move to the configuration
+                if retries == 0 {
+                    return Err(Box::new(e));
+                }
+            }
+            Err(e) => return Err(Box::new(e)),
+        }
+    }
 }
 
 #[cfg(test)]
