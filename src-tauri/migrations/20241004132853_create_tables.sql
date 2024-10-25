@@ -27,14 +27,18 @@ CREATE TABLE
 CREATE TABLE
     IF NOT EXISTS majors (
         major_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        major_name TEXT NOT NULL UNIQUE
+        major_name TEXT NOT NULL UNIQUE,
+        college_id INTEGER NOT NULL,
+        FOREIGN KEY (college_id) REFERENCES colleges (college_id)
     );
 
 -- 创建 classes 表
 CREATE TABLE
     IF NOT EXISTS classes (
         class_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        class_name TEXT NOT NULL UNIQUE
+        class_name TEXT NOT NULL UNIQUE,
+        major_id INTEGER NOT NULL,
+        FOREIGN KEY (major_id) REFERENCES majors (major_id)
     );
 
 -- 创建 academic_records 表
@@ -43,13 +47,9 @@ CREATE TABLE
         record_id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_id INTEGER NOT NULL,
         term_id INTEGER NOT NULL,
-        college_id INTEGER NOT NULL,
-        major_id INTEGER NOT NULL,
         class_id INTEGER NOT NULL,
         gpa REAL,
         FOREIGN KEY (student_id) REFERENCES students (student_id),
         FOREIGN KEY (term_id) REFERENCES terms (term_id),
-        FOREIGN KEY (college_id) REFERENCES colleges (college_id),
-        FOREIGN KEY (major_id) REFERENCES majors (major_id),
         FOREIGN KEY (class_id) REFERENCES classes (class_id)
     );
