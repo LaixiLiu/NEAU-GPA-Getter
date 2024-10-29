@@ -1,14 +1,21 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{AppHandle, Manager};
+use api::*;
+use tauri::Manager;
 
 mod api;
 
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![api::initialize_searcher])
+        .invoke_handler(tauri::generate_handler![
+            initialize_searcher,
+            get_terms,
+            get_colleges,
+            get_majors,
+            get_classes
+        ])
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();

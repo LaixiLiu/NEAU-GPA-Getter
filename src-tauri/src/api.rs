@@ -78,6 +78,10 @@ pub async fn initialize_searcher(
     // 结束计时
     let elapsed = start.elapsed();
     println!("Time elapsed for parsing csv files: {:?}", elapsed);
+    println!(
+        "The number of records: {}",
+        consumer_result.as_ref().unwrap().len()
+    );
 
     // handle the error
     if let Err(e) = producer_result {
@@ -97,6 +101,62 @@ pub async fn initialize_searcher(
     Ok(())
 }
 
-pub fn get_gpa() {}
+#[tauri::command]
+pub async fn get_terms(
+    app: tauri::State<'_, AppState>,
+) -> Result<Vec<db::table::TermInfo>, String> {
+    match app.get_terms().await {
+        Ok(terms) => Ok(terms),
+        Err(e) => Err(format!("Failed to get terms: {:?}", e)),
+    }
+}
 
-pub fn get_order() {}
+#[tauri::command]
+pub async fn get_colleges(
+    app: tauri::State<'_, AppState>,
+) -> Result<Vec<db::table::CollegeInfo>, String> {
+    match app.get_colleges().await {
+        Ok(colleges) => Ok(colleges),
+        Err(e) => Err(format!("Failed to get colleges: {:?}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn get_majors(
+    app: tauri::State<'_, AppState>,
+    college_id: i64,
+) -> Result<Vec<db::table::MajorInfo>, String> {
+    match app.get_majors(college_id).await {
+        Ok(majors) => Ok(majors),
+        Err(e) => Err(format!("Failed to get majors: {:?}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn get_classes(
+    app: tauri::State<'_, AppState>,
+    major_id: i64,
+) -> Result<Vec<db::table::ClassInfo>, String> {
+    match app.get_classes(major_id).await {
+        Ok(classes) => Ok(classes),
+        Err(e) => Err(format!("Failed to get classes: {:?}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn get_gpa(
+    app: tauri::State<'_, AppState>,
+    terms: Vec<i64>,
+    college_id: i64,
+    major_id: i64,
+    grade: i64,
+    class_id: Option<i64>,
+) -> Result<Vec<db::table::ResultRow>, String> {
+    match app
+        .get_gpa(&terms, college_id, major_id, grade, class_id)
+        .await
+    {
+        Ok(gpa) => Ok(gpa),
+        Err(e) => Err(format!("Failed to get gpa: {:?}", e)),
+    }
+}
