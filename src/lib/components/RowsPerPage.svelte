@@ -2,7 +2,7 @@
     import type {DataHandler} from '@vincjo/datatables';
 
     export let handler: DataHandler;
-    const rowsPerPage = handler.getRowsPerPage();
+    $: rowsPerPage = handler.getRowsPerPage();
     const options = [5, 10, 20, 50, 100];
 </script>
 

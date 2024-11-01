@@ -2,9 +2,9 @@
     import type {DataHandler} from '@vincjo/datatables';
 
     export let handler: DataHandler;
-    const pageNumber = handler.getPageNumber();
-    const pageCount = handler.getPageCount();
-    const pages = handler.getPages({ellipsis: true});
+    $: pageNumber = handler.getPageNumber();
+    $: pageCount = handler.getPageCount();
+    $: pages = handler.getPages({ellipsis: true});
 </script>
 
 <!-- Desktop buttons -->
