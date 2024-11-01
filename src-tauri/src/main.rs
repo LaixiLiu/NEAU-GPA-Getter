@@ -14,7 +14,8 @@ fn main() {
             get_terms,
             get_colleges,
             get_majors,
-            get_classes
+            get_classes,
+            get_gpa,
         ])
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
