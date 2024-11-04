@@ -199,37 +199,73 @@ impl AppState {
     pub async fn get_gpa(
         &self,
         terms: &[i64],
-        college_id: i64,
         major_id: i64,
-        grade: i64,
+        grade: &str,
         class_id: Option<i64>,
     ) -> Result<Vec<ResultRow>, Box<dyn Error>> {
-        let mut sql_str = {
-            let placeholders = terms
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<String>>()
-                .join(",");
-
-            format!(
-                r"SELECT term_name As term, college_name AS college, major_name AS major, class_name AS class,
-                        student_number AS sno, students.name AS name, gpa
+        let mut sql_str = match terms.len() {
+            1 => {
+                format!(
+                    r"SELECT    class_name AS class,
+                                student_number AS sno, 
+                                students.name AS name,
+                                gpa
                     FROM academic_records
                     JOIN students ON academic_records.student_id = students.student_id
                     JOIN terms ON academic_records.term_id = terms.term_id
                     JOIN classes ON academic_records.class_id = classes.class_id 
                     JOIN majors ON majors.major_id = classes.major_id
                     JOIN colleges ON colleges.college_id = majors.college_id
-                    WHERE terms.term_id IN ({})
-                    AND colleges.college_id = {}
+                    WHERE terms.term_id = {} 
                     AND majors.major_id = {}
                     AND classes.class_name LIKE '%{}__' ",
-                placeholders, college_id, major_id, grade
-            )
+                    terms[0], major_id, grade
+                )
+            }
+            _ => {
+                let placeholders = terms
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>()
+                    .join(",");
+                format!(
+                    r"SELECT s.cname AS class, s.sno AS sno, s.sname AS name, SUM( academic_records.gpa ) AS gpa 
+                    FROM academic_records
+                    JOIN (
+                        SELECT
+                        -- 学生基础信息字段
+                        students.student_id AS sid,
+                        students.student_number AS sno,
+                        students.name AS sname,
+                        -- 班级相关字段
+                        classes.class_id AS cid,
+                        classes.class_name AS cname 
+                        FROM
+                          students
+                          JOIN academic_records ON academic_records.student_id = students.student_id 
+                          AND academic_records.term_id = {}
+                          JOIN classes ON classes.class_id = academic_records.class_id 
+                          AND classes.major_id = {} 
+                          AND classes.class_name LIKE '%{}__' 
+                        GROUP BY
+                          students.student_id 
+                        ) AS s
+                        ON academic_records.student_id = s.sid 
+                            AND academic_records.term_id IN ( {} )
+                    WHERE 1 = 1 ",
+                    terms[terms.len() - 1],
+                    major_id,
+                    grade,
+                    placeholders
+                )
+            }
         };
         if let Some(class_id) = class_id {
-            let class_str = format!("AND classes.class_id = {}", class_id);
+            let class_str = format!("AND academic_records.class_id = {}", class_id);
             sql_str.push_str(&class_str);
+        }
+        if terms.len() > 1 {
+            sql_str.push_str("GROUP BY s.sid");
         }
         sql_str.push_str(";");
 
@@ -320,6 +356,7 @@ async fn insert_academic_info<'db_connect>(
     .await
     .unwrap();
 
+    // fixme: 园艺园林 -> 园林
     insert_or_ignore(
         tx,
         r"INSERT OR IGNORE INTO colleges (college_name) VALUES (?1);",
@@ -580,14 +617,11 @@ mod tests {
     async fn get_gpa_returns_gpa() {
         let app_state = build_app_state().await.unwrap();
         let terms = vec![1, 2]; // Assuming valid term_ids
-        let college_id = 1; // Assuming a valid college_id
         let major_id = 1; // Assuming a valid major_id
-        let grade = 1;
+        let grade = "1";
         let class_id = Some(1); // Assuming a valid class_id
 
-        let gpa = app_state
-            .get_gpa(&terms, college_id, major_id, grade, class_id)
-            .await;
+        let gpa = app_state.get_gpa(&terms, major_id, &grade, class_id).await;
         assert!(gpa.is_ok());
         assert!(!gpa.unwrap().is_empty());
     }

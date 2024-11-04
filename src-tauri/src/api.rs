@@ -147,15 +147,11 @@ pub async fn get_classes(
 pub async fn get_gpa(
     app: tauri::State<'_, AppState>,
     terms: Vec<i64>,
-    college_id: i64,
     major_id: i64,
-    grade: i64,
+    grade: String,
     class_id: Option<i64>,
 ) -> Result<Vec<db::table::ResultRow>, String> {
-    match app
-        .get_gpa(&terms, college_id, major_id, grade, class_id)
-        .await
-    {
+    match app.get_gpa(&terms, major_id, &grade, class_id).await {
         Ok(gpa) => Ok(gpa),
         Err(e) => Err(format!("Failed to get gpa: {:?}", e)),
     }

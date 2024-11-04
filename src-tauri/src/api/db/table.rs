@@ -65,9 +65,6 @@ impl AcademicInfoId {
 #[derive(sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResultRow {
-    term: String,
-    college: String,
-    major: String,
     class: String,
     sno: String,
     name: String,
