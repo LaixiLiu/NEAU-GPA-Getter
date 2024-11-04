@@ -22,3 +22,7 @@ vite.config.ts.timestamp-*
 
 # Editor
 .vscode
+.idea
+
+# test database
+/src-tauri/com.neau.gpa.getter
