@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use api::*;
-use tauri::Manager;
 
 mod api;
 
@@ -17,7 +16,6 @@ fn main() {
             get_classes,
             get_gpa,
         ])
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();
             tauri::async_runtime::block_on(api::setup_db(handle));
