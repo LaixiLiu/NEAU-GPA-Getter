@@ -10,6 +10,7 @@ use tauri_plugin_dialog::DialogExt;
 mod csv_processor;
 mod data_parser;
 mod db;
+mod err;
 mod student;
 
 pub async fn setup_db(app: &AppHandle) {
@@ -71,7 +72,7 @@ pub async fn initialize_searcher(
     let producer_task = tokio::spawn(async move {
         producer.produce(path).await.unwrap();
     });
-    let consumer_task = tokio::spawn(async move { consumer.consume().await.unwrap() });
+    let consumer_task = tokio::spawn(async move { consumer.consume().await });
 
     let (producer_result, consumer_result) = tokio::join!(producer_task, consumer_task);
 

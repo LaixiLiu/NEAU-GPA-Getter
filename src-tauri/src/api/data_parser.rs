@@ -1,7 +1,9 @@
 use super::csv_processor;
 use futures::future::join_all;
 use regex::Regex;
-use std::{error::Error, fs, path::PathBuf, sync::Arc};
+use std::{ fs, path::PathBuf, sync::Arc};
+use crate::api::csv_processor::get_file_name;
+use crate::api::err::CustomError;
 
 pub struct DataProducer {
     tx: tokio::sync::mpsc::Sender<Vec<csv_processor::CsvTable>>,
@@ -15,12 +17,12 @@ impl DataConsumer {
     pub fn new(rx: tokio::sync::mpsc::Receiver<Vec<csv_processor::CsvTable>>) -> Self {
         Self { rx }
     }
-    pub async fn consume(&mut self) -> Result<Vec<csv_processor::CsvTable>, Box<dyn Error>> {
+    pub async fn consume(&mut self) -> Vec<csv_processor::CsvTable> {
         let mut result = Vec::with_capacity(1000);
         while let Some(csv_table) = self.rx.recv().await {
             result.extend(csv_table);
         }
-        Ok(result)
+        result
     }
 }
 
@@ -28,8 +30,8 @@ impl DataProducer {
     pub fn new(tx: tokio::sync::mpsc::Sender<Vec<csv_processor::CsvTable>>) -> Self {
         Self { tx }
     }
-    pub async fn produce(&self, path: PathBuf) -> Result<(), Box<dyn Error>> {
-        let re = Regex::new(r"^\d{2}.{2,10}$").unwrap();
+    pub async fn produce(&self, path: PathBuf) -> Result<(), CustomError> {
+        let re = Regex::new(r"^\d{2}.{2,10}$")?;
         let mut college_dirs = Vec::new();
         collect_college_dirs(&path, &re, &mut college_dirs)?;
 
@@ -40,7 +42,7 @@ impl DataProducer {
             let tx_clone = self.tx.clone();
 
             let task = tokio::task::spawn(async move {
-                if let Ok(csv_files) = collect_csv_files(&college_path) {
+                let csv_files = collect_csv_files(&college_path)?;
                     let mut data = Vec::new();
                     for csv_file in csv_files {
                         let csv_table = csv_processor::CsvTableBuilder::new(
@@ -53,15 +55,14 @@ impl DataProducer {
                         data.push(csv_table);
                     }
                     tx_clone.send(data).await.expect("Failed to send csv table");
-                } else {
-                    // TODO: handle the error
-                    eprintln!("Failed to collect csv files under {:?}", college_path);
-                }
+
+                Ok::<(), CustomError>(())
             });
             tasks.push(task);
         }
 
-        join_all(tasks).await;
+        let results = join_all(tasks).await;
+        // todo: save the results into a log
         Ok(())
     }
 }
@@ -70,7 +71,7 @@ fn collect_college_dirs(
     path: &PathBuf,
     re: &Regex,
     buf: &mut Vec<PathBuf>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), CustomError> {
     // get the files under the path
     let dirs = fs::read_dir(path)?;
 
@@ -89,9 +90,9 @@ fn collect_college_dirs(
     Ok(())
 }
 
-fn collect_csv_files(dir_path: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn Error + Send + Sync>> {
+fn collect_csv_files(dir_path: &PathBuf) -> Result<Vec<PathBuf>, CustomError> {
     let mut csv_files = Vec::new();
-    let re = Regex::new(r"^[a-z]\d{2}([^\d]*)(\d{4})hz.csv$").expect("build regex failed");
+    let re = Regex::new(r"^[a-z]\d{2}(\D*)(\d{4})hz.csv$")?;
     let files = fs::read_dir(dir_path)?;
 
     for entry in files {
@@ -111,36 +112,32 @@ fn collect_csv_files(dir_path: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn Error +
 
 fn parse_term_and_college_info(
     college_path: &PathBuf,
-) -> Result<(Arc<String>, Arc<String>), Box<dyn Error>> {
+) -> Result<(Arc<String>, Arc<String>), CustomError> {
     let college_name: String = {
-        let college_name = college_path.file_name().unwrap().to_str().unwrap();
-        college_name.chars().skip(2).collect()
+        let t = get_file_name(college_path)?;
+        t.chars().skip(2).collect()
     };
-    let term_path = college_path.parent().unwrap().to_path_buf();
-    let term = match verify_file_name(&term_path, r"^\d{4}-\d{4}-\d学期智育学分绩$") {
-        Ok(()) => term_path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .chars()
-            .take(11)
-            .collect(),
-        Err(e) => {
-            return Err(e);
-        }
+    let term_path = college_path.parent().ok_or(
+        CustomError::UnexpectedFileError(college_path.to_string_lossy().to_string()),
+    )?.to_path_buf();
+    verify_file_name(&term_path, r"^\d{4}-\d{4}-\d学期智育学分绩$")?;
+    let term:String = {
+        let term_str = get_file_name(&term_path)?;
+        term_str.chars().take(11).collect()
     };
 
     Ok((Arc::new(term), Arc::new(college_name)))
 }
 
 /// 校验文件名称
-fn verify_file_name(file_path: &PathBuf, re_str: &str) -> Result<(), Box<dyn Error>> {
-    let re = Regex::new(re_str).unwrap();
+fn verify_file_name(file_path: &PathBuf, re_str: &str) -> Result<(), CustomError> {
+    let re = Regex::new(re_str)?;
 
-    let file_name = file_path.file_name().unwrap().to_str().unwrap();
+    let file_name = get_file_name(file_path)?;
     if !re.is_match(file_name) {
-        return Err(format!("{} 文件名不符合正则表达式: {}", file_name, re_str).into());
+        return Err(
+            CustomError::UnexpectedFileError(format!("{} 文件名不符合要求", file_name)),
+        );
     }
 
     Ok(())
@@ -149,6 +146,7 @@ fn verify_file_name(file_path: &PathBuf, re_str: &str) -> Result<(), Box<dyn Err
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
     use tempfile::tempdir;
     use tokio::sync::mpsc;
 
@@ -172,7 +170,7 @@ mod tests {
             producer.produce(temp_path).await.unwrap();
         });
 
-        let consumer_task = tokio::spawn(async move { consumer.consume().await.unwrap() });
+        let consumer_task = tokio::spawn(async move { consumer.consume().await });
 
         let (producer_result, consumer_result) = tokio::join!(producer_task, consumer_task);
 
