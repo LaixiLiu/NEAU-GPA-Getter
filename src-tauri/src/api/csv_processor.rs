@@ -1,8 +1,7 @@
-use std::{path::PathBuf, sync::Arc};
-use std::path::Path;
 use csv;
 use regex::Regex;
 use serde::Deserialize;
+use std::{path::PathBuf, sync::Arc};
 
 use super::{err::CustomError, student};
 
@@ -26,36 +25,27 @@ pub type CsvRecords = Vec<RowRecord>;
 // csv表
 pub struct CsvTable {
     pub records: CsvRecords,
-    pub info: student::AcademicInfo,
+    pub major_name: String,
+    pub class_name: String,
 }
 
 // csv表构建器
 pub struct CsvTableBuilder<'builder> {
-    term: Arc<String>,
-    college: Arc<String>,
     csv_path: &'builder PathBuf,
 }
 
 impl<'builder> CsvTableBuilder<'builder> {
-    pub fn new(term: Arc<String>, college: Arc<String>, csv_path: &'builder PathBuf) -> Self {
+    pub fn new(csv_path: &'builder PathBuf) -> Self {
         Self {
-            term,
-            college,
             csv_path,
         }
     }
 
     pub fn build(&self) -> Result<CsvTable, CustomError> {
-        let (major, class) = self.extract_major_and_class_info()?;
+        let (major_name, class_name) = self.extract_major_and_class_info()?;
         let records = self.build_csv_records()?;
-        let info = student::AcademicInfo::new(
-            self.term.clone(),
-            self.college.clone(),
-            Arc::new(major),
-            Arc::new(class),
-        );
 
-        Ok(CsvTable { records, info })
+        Ok(CsvTable { records, major_name, class_name })
     }
 
     /// 从csv文件中构建记录
@@ -138,9 +128,7 @@ impl<'builder> CsvTableBuilder<'builder> {
 
             Ok((major_name, class_name))
         } else {
-            Err(CustomError::UnexpectedFileError(
-                file_name.to_string()
-            ))
+            Err(CustomError::UnexpectedFileError(file_name.to_string()))
         }
     }
 }

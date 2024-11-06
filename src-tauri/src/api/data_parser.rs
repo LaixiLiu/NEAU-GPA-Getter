@@ -1,33 +1,41 @@
-use super::csv_processor;
-use futures::future::join_all;
-use regex::Regex;
-use std::{ fs, path::PathBuf, sync::Arc};
+use super::csv_processor::{self, CsvTable};
 use crate::api::csv_processor::get_file_name;
 use crate::api::err::CustomError;
+use futures::future::join_all;
+use log::info;
+use regex::Regex;
+use std::{fs, path::PathBuf, sync::Arc};
+
+
+pub struct CollegeData {
+    pub term_name: Arc<String>,
+    pub college_name: Arc<String>,
+    pub data: Vec<CsvTable>,
+}
 
 pub struct DataProducer {
-    tx: tokio::sync::mpsc::Sender<Vec<csv_processor::CsvTable>>,
+    tx: tokio::sync::mpsc::Sender<CollegeData>,
 }
 
 pub struct DataConsumer {
-    rx: tokio::sync::mpsc::Receiver<Vec<csv_processor::CsvTable>>,
+    rx: tokio::sync::mpsc::Receiver<CollegeData>,
 }
 
 impl DataConsumer {
-    pub fn new(rx: tokio::sync::mpsc::Receiver<Vec<csv_processor::CsvTable>>) -> Self {
+    pub fn new(rx: tokio::sync::mpsc::Receiver<CollegeData>) -> Self {
         Self { rx }
     }
-    pub async fn consume(&mut self) -> Vec<csv_processor::CsvTable> {
-        let mut result = Vec::with_capacity(1000);
-        while let Some(csv_table) = self.rx.recv().await {
-            result.extend(csv_table);
+    pub async fn consume(&mut self) -> Vec<CollegeData> {
+        let mut result = Vec::with_capacity(150);
+        while let Some(college_data) = self.rx.recv().await {
+            result.push(college_data);
         }
         result
     }
 }
 
 impl DataProducer {
-    pub fn new(tx: tokio::sync::mpsc::Sender<Vec<csv_processor::CsvTable>>) -> Self {
+    pub fn new(tx: tokio::sync::mpsc::Sender<CollegeData>) -> Self {
         Self { tx }
     }
     pub async fn produce(&self, path: PathBuf) -> Result<(), CustomError> {
@@ -35,34 +43,46 @@ impl DataProducer {
         let mut college_dirs = Vec::new();
         collect_college_dirs(&path, &re, &mut college_dirs)?;
 
-        let mut tasks = Vec::with_capacity(500);
+        let mut tasks = Vec::with_capacity(150);
 
         for college_path in college_dirs {
-            let (term, college_name) = parse_term_and_college_info(&college_path)?;
+            let (term_name, college_name) = parse_term_and_college_info(&college_path)?;
             let tx_clone = self.tx.clone();
 
             let task = tokio::task::spawn(async move {
                 let csv_files = collect_csv_files(&college_path)?;
-                    let mut data = Vec::new();
-                    for csv_file in csv_files {
-                        let csv_table = csv_processor::CsvTableBuilder::new(
-                            Arc::clone(&term),
-                            Arc::clone(&college_name),
-                            &csv_file,
-                        )
-                        .build()
-                        .expect("Failed to build csv table");
-                        data.push(csv_table);
-                    }
-                    tx_clone.send(data).await.expect("Failed to send csv table");
+                let mut data = Vec::new();
+                for csv_file in csv_files {
+                    let csv_table = csv_processor::CsvTableBuilder::new(
+                        &csv_file,
+                    )
+                    .build()?;
 
-                Ok::<(), CustomError>(())
+                    data.push(csv_table);
+                }
+                tx_clone.send(CollegeData {
+                    term_name: term_name.clone(),
+                    college_name: college_name.clone(),
+                    data,
+                }).await.expect("Failed to send csv table");
+
+                Ok::<String, CustomError>(format!("{}-{} done", term_name, college_name))
             });
             tasks.push(task);
         }
 
         let results = join_all(tasks).await;
-        // todo: save the results into a log
+        // log the results
+        for result in results {
+            match result {
+                Ok(message) => {
+                    info!("{:?}", message);
+                }
+                Err(e) => {
+                    log::error!("{:?}", e);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -117,11 +137,14 @@ fn parse_term_and_college_info(
         let t = get_file_name(college_path)?;
         t.chars().skip(2).collect()
     };
-    let term_path = college_path.parent().ok_or(
-        CustomError::UnexpectedFileError(college_path.to_string_lossy().to_string()),
-    )?.to_path_buf();
+    let term_path = college_path
+        .parent()
+        .ok_or(CustomError::UnexpectedFileError(
+            college_path.to_string_lossy().to_string(),
+        ))?
+        .to_path_buf();
     verify_file_name(&term_path, r"^\d{4}-\d{4}-\d学期智育学分绩$")?;
-    let term:String = {
+    let term: String = {
         let term_str = get_file_name(&term_path)?;
         term_str.chars().take(11).collect()
     };
@@ -135,9 +158,10 @@ fn verify_file_name(file_path: &PathBuf, re_str: &str) -> Result<(), CustomError
 
     let file_name = get_file_name(file_path)?;
     if !re.is_match(file_name) {
-        return Err(
-            CustomError::UnexpectedFileError(format!("{} 文件名不符合要求", file_name)),
-        );
+        return Err(CustomError::UnexpectedFileError(format!(
+            "{} 文件名不符合要求",
+            file_name
+        )));
     }
 
     Ok(())

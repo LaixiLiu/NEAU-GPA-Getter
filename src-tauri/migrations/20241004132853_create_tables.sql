@@ -9,12 +9,18 @@ CREATE TABLE
         student_number TEXT NOT NULL UNIQUE
     );
 
+-- 为students.student_number添加索引
+CREATE INDEX IF NOT EXISTS student_number_index ON students (student_number);
+
 -- 创建 terms 表
 CREATE TABLE
     IF NOT EXISTS terms (
         term_id INTEGER PRIMARY KEY AUTOINCREMENT,
         term_name TEXT NOT NULL UNIQUE
     );
+
+-- 为 terms 表的 term_name 字段添加索引
+CREATE INDEX IF NOT EXISTS idx_term_name ON terms (term_name);
 
 -- 创建 colleges 表
 CREATE TABLE
