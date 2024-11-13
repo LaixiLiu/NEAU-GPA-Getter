@@ -1,11 +1,11 @@
 [package]
-name = "app"
+name = "neau-gpa-getter"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
-default-run = "app"
+description = "A Tauri App to get gpa info for NEAUer"
+authors = ["Laixi Liu"]
+license = "MIT OR APACHE-2.0"
+repository = "https://github.com/LaixiLiu/NEAU-GPA-Getter.git"
+default-run = "neau-gpa-getter"
 edition = "2021"
 rust-version = "1.60"
 
