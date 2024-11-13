@@ -93,6 +93,7 @@ dependencies = [
  "csv",
  "dotenv",
  "futures",
+ "log",
  "regex",
  "serde",
  "serde_json",
@@ -103,6 +104,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "thiserror",
+ "time",
  "tokio",
 ]
 
