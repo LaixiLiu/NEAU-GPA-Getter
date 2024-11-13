@@ -1,7 +1,6 @@
 <script>
     import { invoke } from "@tauri-apps/api/core";
     import { createEventDispatcher } from "svelte";
-    import DataImporter from "$lib/components/DataImporter.svelte";
 
     // create a dispatcher
     const dispatch = createEventDispatcher();

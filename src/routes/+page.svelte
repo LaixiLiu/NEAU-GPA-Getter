@@ -3,7 +3,7 @@
     import Datatable from "$lib/components/table/Datatable.svelte";
     import AcademicInfoSelector from "$lib/components/AcademicInfoSelector.svelte";
     import DataImporter from "$lib/components/DataImporter.svelte";
-    import { tableData} from "../store.js";
+    import { tableData } from "../store.js";
 
     function handleAcademicInfoSubmit(event) {
         let data = event.detail;
