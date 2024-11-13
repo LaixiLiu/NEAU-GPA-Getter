@@ -5,7 +5,7 @@ use api::*;
 use simplelog::{
     format_description, CombinedLogger, Config, ConfigBuilder, LevelFilter, TermLogger, WriteLogger,
 };
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use tauri::Manager;
 
 mod api;

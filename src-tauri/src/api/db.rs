@@ -1,16 +1,13 @@
 pub mod table;
 
-use super::{
-    csv_processor::{CsvRecords, CsvTable},
-    student::AcademicInfo,
-};
+use super::csv_processor::{CsvRecords, CsvTable};
 use crate::api::data_parser::CollegeData;
 use log::info;
 use sqlx::{Pool, Row, Sqlite, SqlitePool};
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
-use table::{AcademicInfoId, ClassInfo, CollegeInfo, MajorInfo, ResultRow, TermInfo};
+use table::{ClassInfo, CollegeInfo, MajorInfo, ResultRow, TermInfo};
 use tauri::{AppHandle, Manager};
 
 #[derive(Clone)]

@@ -11,7 +11,6 @@ mod csv_processor;
 mod data_parser;
 mod db;
 mod err;
-mod student;
 
 pub async fn setup_db(app: &AppHandle) {
     let db = AppState::build(app)
