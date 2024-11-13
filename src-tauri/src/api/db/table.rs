@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(sqlx::FromRow, Serialize)]
+#[derive(sqlx::FromRow, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ClassInfo {
     class_id: i64,

@@ -14,7 +14,7 @@ mod err;
 mod student;
 
 pub async fn setup_db(app: &AppHandle) {
-    let db = db::AppState::build(app)
+    let db = AppState::build(app)
         .await
         .expect("Failed to build the database");
     app.manage(db);
@@ -54,35 +54,23 @@ async fn pick_folder_dialog(app: AppHandle) -> Option<PathBuf> {
 pub async fn initialize_searcher(
     db: tauri::State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let path: PathBuf = match pick_folder_dialog(app).await {
         Some(val) => val,
-        None => return Ok(()),
+        None => return Err("取消选择文件夹".to_string()),
     };
-
-    // 计时
-    let start = std::time::Instant::now();
 
     // parse csv
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     let producer = data_parser::DataProducer::new(tx);
     let mut consumer = data_parser::DataConsumer::new(rx);
 
-    // todo: handle the error
     let producer_task = tokio::spawn(async move {
         producer.produce(path).await.unwrap();
     });
     let consumer_task = tokio::spawn(async move { consumer.consume().await });
 
     let (producer_result, consumer_result) = tokio::join!(producer_task, consumer_task);
-
-    // 结束计时
-    let elapsed = start.elapsed();
-    println!("Time elapsed for parsing csv files: {:?}", elapsed);
-    println!(
-        "The number of records: {}",
-        consumer_result.as_ref().unwrap().len()
-    );
 
     // handle the error
     if let Err(e) = producer_result {
@@ -94,12 +82,12 @@ pub async fn initialize_searcher(
     };
 
     // set db
-    // TODO: use multiple threads to insert data
-    db.set(data)
+    let result = db
+        .set(data)
         .await
         .map_err(|e| format!("Failed to set data: {:?}", e))?;
 
-    Ok(())
+    Ok(result)
 }
 
 #[tauri::command]
@@ -137,8 +125,9 @@ pub async fn get_majors(
 pub async fn get_classes(
     app: tauri::State<'_, AppState>,
     major_id: i64,
+    grade: i32,
 ) -> Result<Vec<db::table::ClassInfo>, String> {
-    match app.get_classes(major_id).await {
+    match app.get_classes(major_id, grade).await {
         Ok(classes) => Ok(classes),
         Err(e) => Err(format!("Failed to get classes: {:?}", e)),
     }

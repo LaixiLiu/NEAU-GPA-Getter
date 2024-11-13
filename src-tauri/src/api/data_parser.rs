@@ -6,10 +6,10 @@ use log::info;
 use regex::Regex;
 use std::{fs, path::PathBuf, sync::Arc};
 
-
 pub struct CollegeData {
     pub term_name: Arc<String>,
     pub college_name: Arc<String>,
+    pub college_number: Arc<String>,
     pub data: Vec<CsvTable>,
 }
 
@@ -46,25 +46,26 @@ impl DataProducer {
         let mut tasks = Vec::with_capacity(150);
 
         for college_path in college_dirs {
-            let (term_name, college_name) = parse_term_and_college_info(&college_path)?;
+            let (term_name, college_name, college_number) = parse_term_and_college_info(&college_path)?;
             let tx_clone = self.tx.clone();
 
             let task = tokio::task::spawn(async move {
                 let csv_files = collect_csv_files(&college_path)?;
                 let mut data = Vec::new();
                 for csv_file in csv_files {
-                    let csv_table = csv_processor::CsvTableBuilder::new(
-                        &csv_file,
-                    )
-                    .build()?;
+                    let csv_table = csv_processor::CsvTableBuilder::new(&csv_file).build()?;
 
                     data.push(csv_table);
                 }
-                tx_clone.send(CollegeData {
-                    term_name: term_name.clone(),
-                    college_name: college_name.clone(),
-                    data,
-                }).await.expect("Failed to send csv table");
+                tx_clone
+                    .send(CollegeData {
+                        term_name: term_name.clone(),
+                        college_name: college_name.clone(),
+                        college_number: college_number.clone(),
+                        data,
+                    })
+                    .await
+                    .expect("Failed to send csv table");
 
                 Ok::<String, CustomError>(format!("{}-{} done", term_name, college_name))
             });
@@ -132,10 +133,10 @@ fn collect_csv_files(dir_path: &PathBuf) -> Result<Vec<PathBuf>, CustomError> {
 
 fn parse_term_and_college_info(
     college_path: &PathBuf,
-) -> Result<(Arc<String>, Arc<String>), CustomError> {
-    let college_name: String = {
+) -> Result<(Arc<String>, Arc<String>, Arc<String>), CustomError> {
+    let (college_name, college_number) = {
         let t = get_file_name(college_path)?;
-        t.chars().skip(2).collect()
+        (t.chars().skip(2).collect(), t.chars().take(2).collect())
     };
     let term_path = college_path
         .parent()
@@ -149,7 +150,7 @@ fn parse_term_and_college_info(
         term_str.chars().take(11).collect()
     };
 
-    Ok((Arc::new(term), Arc::new(college_name)))
+    Ok((Arc::new(term), Arc::new(college_name), Arc::new(college_number)))
 }
 
 /// 校验文件名称

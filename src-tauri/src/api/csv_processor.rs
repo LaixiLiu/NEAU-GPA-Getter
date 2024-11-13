@@ -1,9 +1,9 @@
 use csv;
 use regex::Regex;
 use serde::Deserialize;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
-use super::{err::CustomError, student};
+use super::err::CustomError;
 
 // 行记录
 #[derive(Deserialize)]
@@ -36,16 +36,18 @@ pub struct CsvTableBuilder<'builder> {
 
 impl<'builder> CsvTableBuilder<'builder> {
     pub fn new(csv_path: &'builder PathBuf) -> Self {
-        Self {
-            csv_path,
-        }
+        Self { csv_path }
     }
 
     pub fn build(&self) -> Result<CsvTable, CustomError> {
         let (major_name, class_name) = self.extract_major_and_class_info()?;
         let records = self.build_csv_records()?;
 
-        Ok(CsvTable { records, major_name, class_name })
+        Ok(CsvTable {
+            records,
+            major_name,
+            class_name,
+        })
     }
 
     /// 从csv文件中构建记录
@@ -119,12 +121,12 @@ impl<'builder> CsvTableBuilder<'builder> {
     /// regex构建失败或解析失败，返回`CustomError::RegexError`
     /// 如果出现了预期外的文件，返回`CustomError::UnexpectedFileError`
     fn extract_major_and_class_info(&self) -> Result<(String, String), CustomError> {
-        let re = Regex::new(r"^[a-z]\d{2}((\D*)\d{4})hz.csv$")?;
+        let re = Regex::new(r"^[a-z](\d{2})((\D*)\d{4})hz.csv$")?;
         let file_name = get_file_name(self.csv_path)?;
         if re.is_match(file_name) {
             let captures = re.captures(file_name).expect("Regex match failed"); // safe to unwrap
-            let class_name = captures.get(1).map_or("", |m| m.as_str()).to_string();
-            let major_name = captures.get(2).map_or("", |m| m.as_str()).to_string();
+            let class_name = captures.get(2).map_or("", |m| m.as_str()).to_string();
+            let major_name = captures.get(3).map_or("", |m| m.as_str()).to_string();
 
             Ok((major_name, class_name))
         } else {

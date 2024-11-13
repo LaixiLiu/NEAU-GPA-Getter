@@ -1,14 +1,17 @@
 pub mod table;
+
 use super::{
     csv_processor::{CsvRecords, CsvTable},
     student::AcademicInfo,
 };
+use crate::api::data_parser::CollegeData;
+use log::info;
 use sqlx::{Pool, Row, Sqlite, SqlitePool};
+use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 use table::{AcademicInfoId, ClassInfo, CollegeInfo, MajorInfo, ResultRow, TermInfo};
 use tauri::{AppHandle, Manager};
-use crate::api::data_parser::CollegeData;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -70,71 +73,63 @@ impl AppState {
     /// # Errors
     ///
     /// return the error if the operation failed
-    pub async fn set(&self, data: Vec<CollegeData>) -> Result<(), Box<dyn Error>> {
-        let group_size = 400; // todo: move to the configuration
+    pub async fn set(&self, data: Vec<CollegeData>) -> Result<String, Box<dyn Error>> {
+        // sort the data by term name
+        let mut data = data;
+        data.sort_by(|a, b| a.term_name.cmp(&b.term_name));
 
         // create the task handles
         let mut task_handles = Vec::new();
-        
-        println!("data len: {}", data.len());
 
+        info!("Inserting academic info");
+
+        // insert the term and colleges info at first
+
+        let (terms_map, classes_map) = {
+            let mut tx = self.db.begin().await.unwrap();
+            let (terms, classes) = insert_academic_info(&mut tx, &data).await.unwrap();
+            tx.commit().await?;
+            (terms, Arc::new(classes))
+        };
 
         // create the tasks
         for college_data in data {
-            // clone the data and the database
+            // extract the college data
+            let CollegeData {
+                term_name,
+                college_name: _,
+                college_number: _,
+                data,
+            } = college_data;
+            let term_id = *terms_map.get(term_name.as_str()).unwrap();
+
+            // create a db connection clone
             let db = self.db.clone();
+
+            let classes_map = classes_map.clone();
             // create the task
             let task = tokio::spawn(async move {
-                // extract the college data
-                let CollegeData{term_name, college_name, data} = college_data;
+                // begin the transaction
                 let mut tx = db.begin().await.unwrap();
-                // insert the term info
-                insert_or_ignore_term(&mut tx, &term_name).await.unwrap();
-                // insert the college info
-                // fixme: 园艺园林 -> 园林
-                let college_id = insert_or_ignore_college(&mut tx, &college_name).await.unwrap();
-                tx.commit().await.unwrap();
-                
-                let mut child_task_handles = Vec::new();
-                
                 for table in data {
-                    let CsvTable{records, major_name, class_name} = table;
-                    let mut tx = db.begin().await.unwrap();
-                    // 插入专业信息
-                    let major_id = insert_or_ignore_major(
-                        &mut tx,
-                        &major_name,
-                        college_id,
-                    ).await.unwrap();
-                    // 插入班级信息
-                    let class_id = insert_or_ignore_class(
-                        &mut tx,
-                        &class_name,
-                        major_id,
-                    ).await.unwrap();
-                    tx.commit().await.unwrap();
-                    let child_task = tokio::spawn(async move {
-                        
-                    });
-                    child_task_handles.push(child_task);
+                    // extract the academic info
+                    let CsvTable {
+                        records,
+                        major_name: _,
+                        class_name,
+                    } = table;
+                    // begin the transaction
+                    // get the classes id
+                    let class_id = *classes_map.get(class_name.as_str()).unwrap();
+
+                    // insert the academic records
+                    insert_csv_row_record(&mut tx, &records, term_id, class_id)
+                        .await
+                        .unwrap();
                 }
-                let results = futures::future::join_all(child_task_handles).await;
-                
-                let mut success_cnt = 0;
-                let mut failed_cnt = 0;
-                for result in results {
-                    match result {
-                        Ok(_) => {
-                            success_cnt += 1;
-                        }
-                        Err(_) => {
-                            failed_cnt += 1;
-                        }
-                    }
-                }
-                
-                println!("Success: {}, Failed: {}", success_cnt, failed_cnt);
-                
+                // commit the transaction
+                tx.commit().await.unwrap();
+
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             });
             // push the task handle to the vector
@@ -158,11 +153,12 @@ impl AppState {
             }
         }
 
-        println!("Success: {}, Failed: {}", success_cnt, failed_cnt);
+        let result_str = format!(
+            "Success file count: {}, Failed file count: {}",
+            success_cnt, failed_cnt
+        );
 
-        // todo: handle the results
-
-        Ok(())
+        Ok(result_str)
     }
 
     /// get the loaded term info
@@ -196,13 +192,19 @@ impl AppState {
     }
 
     /// get the classes under the major
-    pub async fn get_classes(&self, major_id: i64) -> Result<Vec<ClassInfo>, Box<dyn Error>> {
-        let classes: Vec<ClassInfo> =
-            sqlx::query_as(r"SELECT class_id, class_name FROM classes WHERE major_id = ?1;")
-                .bind(major_id)
-                .fetch_all(&self.db)
-                .await
-                .unwrap(); // todo: handle the error
+    pub async fn get_classes(
+        &self,
+        major_id: i64,
+        grade: i32,
+    ) -> Result<Vec<ClassInfo>, Box<dyn Error>> {
+        let sql_statement = format!(
+            r"SELECT class_id, class_name FROM classes WHERE major_id = {} AND classes.class_name LIKE '%{}__';",
+            major_id, grade
+        );
+        let classes: Vec<ClassInfo> = sqlx::query_as(&sql_statement)
+            .fetch_all(&self.db)
+            .await
+            .unwrap(); // todo: handle the error
         Ok(classes)
     }
 
@@ -271,7 +273,8 @@ impl AppState {
                         ) AS s
                         ON academic_records.student_id = s.sid 
                             AND academic_records.term_id IN ( {} )
-                    WHERE 1 = 1 ",
+                    WHERE 1 = 1
+                    ",
                     terms[terms.len() - 1],
                     major_id,
                     grade,
@@ -280,7 +283,7 @@ impl AppState {
             }
         };
         if let Some(class_id) = class_id {
-            let class_str = format!("AND academic_records.class_id = {}", class_id);
+            let class_str = format!("AND academic_records.class_id = {}\n", class_id);
             sql_str.push_str(&class_str);
         }
         if terms.len() > 1 {
@@ -296,214 +299,182 @@ impl AppState {
     }
 }
 
+/// insert the academic info and return the id map
+pub async fn insert_academic_info<'db_connect>(
+    tx: &mut sqlx::Transaction<'db_connect, Sqlite>,
+    data: &Vec<CollegeData>,
+) -> Result<(HashMap<String, i64>, HashMap<String, i64>), Box<dyn Error + Send + Sync>> {
+    // create the terms, colleges and majors map
+    let mut terms = HashMap::new();
+    let mut colleges = HashMap::new();
+    let mut majors = HashMap::new();
+    let mut classes = HashMap::new();
+
+    // for each college data
+    for college_data in data {
+        // extract the college data
+        let CollegeData {
+            term_name,
+            college_name,
+            college_number,
+            data: _,
+        } = college_data;
+        // insert the term and college info
+        if let None = terms.get(term_name.as_str()) {
+            let term_id = insert_terms(tx, term_name.as_str()).await?;
+            terms.insert(term_name.as_str().to_string(), term_id);
+        }
+        let college_id = {
+            match colleges.get(college_name.as_str()) {
+                Some(college_id) => *college_id,
+                None => {
+                    let college_id =
+                        insert_college(tx, college_name.as_str(), college_number.as_str()).await?;
+                    colleges.insert(college_number.as_str().to_string(), college_id);
+                    college_id
+                }
+            }
+        };
+        // insert info from each table
+        for table in &college_data.data {
+            let CsvTable {
+                major_name,
+                class_name,
+                ..
+            } = table;
+            // insert the major info
+            let major_id = if let Some(id) = majors.get(major_name) {
+                *id
+            } else {
+                let id = insert_major(tx, major_name.as_str(), college_id.clone()).await?;
+                majors.insert(major_name.as_str().to_string(), id);
+                id
+            };
+            // insert the class info
+            if let None = classes.get(class_name) {
+                let class_id = insert_class(tx, class_name, major_id).await?;
+                classes.insert(class_name.to_string(), class_id);
+            }
+        }
+    }
+    Ok((terms, classes))
+}
+
 /// insert the csv row record into the database
 /// should be called after the academic info is inserted
 async fn insert_csv_row_record<'db_connect>(
     tx: &mut sqlx::Transaction<'db_connect, Sqlite>,
     records: &CsvRecords,
-    academic_info_id: AcademicInfoId,
+    term_id: i64,
+    class_id: i64,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     for record in records {
         // insert the student info
-        let student_id = insert_or_ignore_student(tx, &record.sid, &record.name).await.unwrap();
-        // insert the academic record
-        sqlx::query(
-            r"INSERT INTO academic_records 
-                ( gpa, term_id, class_id, student_id )
-                VALUES (?1, ?2, ?3, ?4);",
-        )
-        .bind(record.gpa)
-        .bind(academic_info_id.term_id)
-        .bind(academic_info_id.class_id)
-        .bind(student_id)
-        .execute(&mut **tx)
-        .await
-        .unwrap();
+        let student_id = insert_or_ignore_student(tx, &record.sid, &record.name)
+            .await
+            .unwrap();
+        // create the sql statement
+        let sql_statement = format!(
+            r"INSERT OR IGNORE INTO academic_records ( gpa, term_id, class_id, student_id ) VALUES ({}, {}, {}, {});",
+            record.gpa.unwrap_or(0.0),
+            term_id,
+            class_id,
+            student_id
+        );
+        insert_with_retry(tx, &sql_statement).await.unwrap();
     }
 
     Ok(())
 }
 
-/// insert the academic info into the database
-///
-/// # Arguments
-///
-/// * `tx` - the database transaction
-/// * `record` - the academic info
-///
-/// # Returns
-///
-/// the academic info id
-///
-/// # Errors
-///
-/// return the error if the operation failed
-async fn insert_academic_info<'db_connect>(
-    tx: &mut sqlx::Transaction<'db_connect, Sqlite>,
-    record: &AcademicInfo,
-) -> Result<AcademicInfoId, Box<dyn Error + Send + Sync>> {
-    // insert the academic info into the database
-
-    insert_or_ignore(
-        tx,
-        r"INSERT OR IGNORE INTO terms (term_name) VALUES (?1);",
-        vec![record.term.as_str()],
-        None,
-    )
-    .await
-    .unwrap();
-    let term_id = get_record_id(
-        tx,
-        r"SELECT term_id FROM terms WHERE term_name = ?1;",
-        vec![record.term.as_str()],
-    )
-    .await
-    .unwrap();
-
-    // fixme: 园艺园林 -> 园林
-    insert_or_ignore(
-        tx,
-        r"INSERT OR IGNORE INTO colleges (college_name) VALUES (?1);",
-        vec![record.college.as_str()],
-        None,
-    )
-    .await
-    .unwrap();
-    let college_id = get_record_id(
-        tx,
-        r"SELECT college_id FROM colleges WHERE college_name = ?1;",
-        vec![record.college.as_str()],
-    )
-    .await
-    .unwrap();
-
-    insert_or_ignore(
-        tx,
-        r"INSERT OR IGNORE INTO majors (major_name, college_id) VALUES (?1, ?2);",
-        vec![record.major.as_str()],
-        Some(college_id),
-    )
-    .await
-    .unwrap();
-    let major_id = get_record_id(
-        tx,
-        r"SELECT major_id FROM majors WHERE major_name = ?1;",
-        vec![record.major.as_str()],
-    )
-    .await
-    .unwrap();
-
-    insert_or_ignore(
-        tx,
-        r"INSERT OR IGNORE INTO classes (class_name, major_id) VALUES (?1, ?2);",
-        vec![record.class.as_str()],
-        Some(major_id),
-    )
-    .await
-    .unwrap();
-    let class_id = get_record_id(
-        tx,
-        r"SELECT class_id FROM classes WHERE class_name = ?1;",
-        vec![record.class.as_str()],
-    )
-    .await
-    .unwrap();
-
-    Ok(AcademicInfoId {
-        term_id,
-        college_id,
-        major_id,
-        class_id,
-    })
-}
-
-async fn insert_or_ignore_term(
+async fn insert_terms(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     term_name: &str,
 ) -> Result<i64, Box<dyn Error + Send + Sync>> {
-    insert_or_ignore(
+    insert(
         tx,
         r"INSERT OR IGNORE INTO terms (term_name) VALUES (?1);",
         vec![term_name],
         None,
     )
     .await?;
-    
+
     let term_id = get_record_id(
         tx,
         r"SELECT term_id FROM terms WHERE term_name = ?1;",
         vec![term_name],
     )
     .await?;
-    
+
     Ok(term_id)
 }
 
-async fn insert_or_ignore_college(
+async fn insert_college(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     college_name: &str,
+    college_number: &str,
 ) -> Result<i64, Box<dyn Error + Send + Sync>> {
-    insert_or_ignore(
+    insert(
         tx,
-        r"INSERT OR IGNORE INTO colleges (college_name) VALUES (?1);",
-        vec![college_name],
+        r"INSERT INTO colleges (college_name, college_number) VALUES (?1, ?2) ON CONFLICT(college_number) DO UPDATE SET college_name = excluded.college_name;",
+        vec![college_name, college_number],
         None,
     )
     .await?;
-    
+
     let college_id = get_record_id(
         tx,
-        r"SELECT college_id FROM colleges WHERE college_name = ?1;",
-        vec![college_name],
+        r"SELECT college_id FROM colleges WHERE college_number = ?1;",
+        vec![college_number],
     )
     .await?;
-    
+
     Ok(college_id)
 }
 
-async fn insert_or_ignore_major(
+async fn insert_major(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     major_name: &str,
     college_id: i64,
 ) -> Result<i64, Box<dyn Error + Send + Sync>> {
-    insert_or_ignore(
+    insert(
         tx,
         r"INSERT OR IGNORE INTO majors (major_name, college_id) VALUES (?1, ?2);",
         vec![major_name, &college_id.to_string()],
         Some(college_id),
     )
     .await?;
-    
+
     let major_id = get_record_id(
         tx,
         r"SELECT major_id FROM majors WHERE major_name = ?1;",
         vec![major_name],
     )
     .await?;
-    
+
     Ok(major_id)
 }
 
-async fn insert_or_ignore_class(
+async fn insert_class(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     class_name: &str,
     major_id: i64,
 ) -> Result<i64, Box<dyn Error + Send + Sync>> {
-    insert_or_ignore(
+    insert(
         tx,
         r"INSERT OR IGNORE INTO classes (class_name, major_id) VALUES (?1, ?2);",
         vec![class_name, &major_id.to_string()],
         Some(major_id),
     )
     .await?;
-    
+
     let class_id = get_record_id(
         tx,
         r"SELECT class_id FROM classes WHERE class_name = ?1;",
         vec![class_name],
     )
     .await?;
-    
+
     Ok(class_id)
 }
 
@@ -512,21 +483,19 @@ async fn insert_or_ignore_student(
     student_number: &str,
     name: &str,
 ) -> Result<i64, Box<dyn Error + Send + Sync>> {
-    insert_or_ignore(
-        tx,
-        r"INSERT OR IGNORE INTO students (student_number, name) VALUES (?1, ?2);",
-        vec![student_number, name],
-        None,
-    )
-    .await?;
-    
+    let sql_statement = format!(
+        r"INSERT OR IGNORE INTO students (student_number, name) VALUES ('{}', '{}');",
+        student_number, name
+    );
+    insert_with_retry(tx, &sql_statement).await?;
+
     let student_id = get_record_id(
         tx,
         r"SELECT student_id FROM students WHERE student_number = ?1;",
         vec![student_number],
     )
     .await?;
-    
+
     Ok(student_id)
 }
 
@@ -576,28 +545,16 @@ async fn get_record_id<'db_connection>(
 /// # Errors
 ///
 /// return the error if the operation failed
-async fn insert_or_ignore<'db_connection>(
+async fn insert_with_retry<'db_connection>(
     tx: &mut sqlx::Transaction<'db_connection, Sqlite>,
     sql_statement: &str,
-    values: Vec<&str>,
-    id: Option<i64>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut retries = 20; // todo: move to the configuration
     let retry_delay = tokio::time::Duration::from_millis(100); // todo: move to the configuration
 
     // loop until the operation is successful
     loop {
-        // create the sql statement
-        let mut sql = sqlx::query(sql_statement);
-        for value in &values {
-            sql = sql.bind(value);
-        }
-
-        if let Some(id) = id {
-            sql = sql.bind(id);
-        }
-
-        let result = sql.execute(&mut **tx).await;
+        let result = sqlx::query(sql_statement).execute(&mut **tx).await;
         match result {
             Ok(_) => return Ok(()),
             Err(e) if e.to_string().contains("database is locked") => {
@@ -610,6 +567,25 @@ async fn insert_or_ignore<'db_connection>(
             Err(e) => return Err(Box::new(e)),
         }
     }
+}
+
+async fn insert<'db_connection>(
+    tx: &mut sqlx::Transaction<'db_connection, Sqlite>,
+    sql_statement: &str,
+    values: Vec<&str>,
+    id: Option<i64>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // create the sql statement
+    let mut sql = sqlx::query(sql_statement);
+    for value in &values {
+        sql = sql.bind(value);
+    }
+
+    if let Some(id) = id {
+        sql = sql.bind(id);
+    }
+    sql.execute(&mut **tx).await?;
+    Ok(())
 }
 
 #[cfg(test)]

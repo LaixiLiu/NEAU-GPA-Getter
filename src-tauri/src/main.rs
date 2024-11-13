@@ -2,6 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use api::*;
+use simplelog::{
+    format_description, CombinedLogger, Config, ConfigBuilder, LevelFilter, TermLogger, WriteLogger,
+};
+use std::fs::{File, OpenOptions};
+use tauri::Manager;
 
 mod api;
 
@@ -17,8 +22,51 @@ fn main() {
             get_gpa,
         ])
         .setup(|app| {
+            // init db
             let handle = app.handle();
-            tauri::async_runtime::block_on(api::setup_db(handle));
+
+            let mut path = app.path().data_dir().expect("Failed to get data directory");
+
+            // append the data dir name to the path
+            path.push("com.neau.gpa.getter");
+            if !path.exists() {
+                std::fs::create_dir(&path).expect("Failed to create data directory");
+            }
+            path.push("tauri.log");
+
+            // init logger
+            CombinedLogger::init(vec![
+                TermLogger::new(
+                    LevelFilter::Warn,
+                    Config::default(),
+                    simplelog::TerminalMode::Mixed,
+                    simplelog::ColorChoice::Auto,
+                ),
+                WriteLogger::new(
+                    LevelFilter::Info,
+                    ConfigBuilder::new()
+                        .set_time_offset_to_local()
+                        .expect("Failed to set time offset")
+                        .set_time_format_custom(format_description!(
+                            "[month]-[day] [hour]:[minute]:[second]"
+                        ))
+                        .build(),
+                    OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .expect("Failed to open log file"),
+                ),
+            ])
+            .expect("Failed to initialize logger");
+
+            log::info!("Logger initialized");
+
+            tauri::async_runtime::block_on(setup_db(handle));
+
+            log::info!("DB initialized");
+
             Ok(())
         })
         .build(tauri::generate_context!())
