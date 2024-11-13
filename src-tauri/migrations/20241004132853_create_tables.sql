@@ -26,7 +26,8 @@ CREATE INDEX IF NOT EXISTS idx_term_name ON terms (term_name);
 CREATE TABLE
     IF NOT EXISTS colleges (
         college_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        college_name TEXT NOT NULL UNIQUE
+        college_name TEXT NOT NULL,
+        college_number TEXT NOT NULL UNIQUE
     );
 
 -- 创建 majors 表
